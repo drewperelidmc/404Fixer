@@ -24,7 +24,7 @@
   },
   "devDependencies": {},
   "scripts": {
-    "start": "node main.js -u https://dev.ocweekly.com/goddamn-you-vin-scully-6395601/"
+    "start": "node main.js -i 6396598"
   },
   "author": "",
   "license": "ISC"

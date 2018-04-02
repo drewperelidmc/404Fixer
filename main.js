@@ -50,65 +50,64 @@ if (options.url){
 	else articleUrl = new URL(buildUrl(process.env.URL, {path: options.url}));
 }
 
-var requestPromise;
-//First, if the url is provided, check to make sure it's actually a 404
-if (options.url){
-	requestPromise = checkFor404(articleUrl);
-}
-
-//First get the id if not supplied
+//Then get the id if not supplied
 if (!options.id){
 	articleId = parseIdFromUrl(articleUrl);
 	if (articleId === false) process.exit();
 }
 else articleId = options.id;
 
-var searchPromise;
-if (options.year){
-	//If the year was supplied, we can just look through one file to find the article
-	const xmlFileName = 'Content-' + options.year + '.xml';
-	searchPromise = searchFileForArticle(xmlFileName, articleId);
-}
-else {
-	searchPromise = readdir(process.env.XML_FILE_DIR)
-	.then(files => {
-		//For all files in xmlFiles, Search for article using id
-		return files.reduce((promise, file) => {
-			return promise.then(found => {
-				if (found) return Promise.resolve(found);
-				return searchFileForArticle(file, articleId);
-			})
-		}, Promise.resolve())
+var requestPromise;
+//Then, if the url is provided, set up promise to check that it's actually a 404
+if (options.url) requestPromise = checkFor404(articleUrl);
+else requestPromise = Promise.resolve();
 
-	});
-	
-}
 
 
 //Load relevant xml file
+requestPromise
+.then(() => {
+	//Set up the search promise
+	var searchPromise;
+	if (options.year){
+		//If the year was supplied, we can just look through one file to find the article
+		const xmlFileName = 'Content-' + options.year + '.xml';
+		searchPromise = searchFileForArticle(xmlFileName, articleId);
+	}
+	else {
+		searchPromise = readdir(process.env.XML_FILE_DIR)
+		.then(files => {
+			//For all files in xmlFiles, Search for article using id
+			return files.reduce((promise, file) => {
+				return promise.then(found => {
+					if (found) return Promise.resolve(found);
+					return searchFileForArticle(file, articleId);
+				})
+			}, Promise.resolve())
 
-
-searchPromise
-.then(article => {
-	return searchForArticle(article.description[0]).then(() => return Promise.resolve(article));
+		});	
+	}
+	return searchPromise;
 })
 .then(article => {
-	console.log('Creating post...'.update);
-	//Time to post it to wordpress
-	
-	//Format the images and iframes
-	article = addImageHTML(article);
-	article = addVideoHTML(article);
-	//Create the json for the post
-	var postJSON = {
-		title: article.title[0],
-		content: article.body[0],
-		date: article.creation_date[0],
-		slug: slugify(article.title[0]) + '-' + article.oid[0],
-		status: 'draft',
-		ocw_author: 'author' in article ? titleCase(article.author[0]) : null
-	};
-	//return wp.posts().create(postJSON)
+	return searchForArticle(article.title[0]).then(() => Promise.resolve(article));
+})
+.then (article => {
+	var newUrl = createArticleUrl(article);
+	if (newUrl !== articleUrl){
+		//Test new url for 404
+		return checkFor404(new URL(newUrl));
+	}
+	else return Promise.resolve(article);
+})
+.then(article => {
+	return findCategoryForArticle(article).then(categoryId => {
+		article.new_category_id = categoryId;
+		return Promise.resolve(article);
+	})
+})
+.then(article => {
+	return createPostFromArticleObject(article);
 })
 .then(result => {
 	var editUrl = process.env.URL + '/wp-admin/post.php?post=' + result.id + '&action=edit';
@@ -141,16 +140,25 @@ searchPromise
 
 function checkFor404(urlObj){
 	var url = urlObj.toString();
+	console.log(('Checking ' + url + ' for 404 response...').update);
 	return new Promise((resolve, reject) => {
 		request({
 			uri: url,
-			resolveWithFullResponse: true
+			resolveWithFullResponse: true,
+			auth: {
+				username: process.env.WP_USERNAME,
+				password: process.env.WP_PASSWORD
+			}
 		})
 		.then(() => {
 			reject(options.url + ' responded with 200');
 		})
 		.catch(err => {
-			if (err.statusCode === 404) resolve();
+			if (err.statusCode === 404) {
+				console.log('Received 404 response'.success);
+				resolve();
+			}
+			else if (err.statusCode === 503) reject(options.url + ' responded with 503, indicating improper login credentials in .env');
 			else reject(options.url + ' responded with ' + err.statusCode);
 		});
 	});
@@ -170,14 +178,23 @@ function parseIdFromUrl(urlObj){
 		console.log('There is more than one potential id in the url. Please supply the id directly'.error);
 		return false;
 	}
-	console.log(('Id found: ' + articleId).success);
-	return potentialIds[0];
+	var found = potentialIds[0];
+	console.log(('Id found: ' + found).success);
+	return found;
 }
 
+function createArticleUrl(articleObj){
+	console.log(createArticleSlug(articleObj));
+	return buildUrl(process.env.URL, {path: createArticleSlug(articleObj)});
+}
 
-function searchForArticle(snippet){
+function createArticleSlug(articleObj){
+	return slugify(articleObj.title[0]) + '-' + articleObj.oid[0];
+}
+
+function searchForArticle(title){
 	console.log('Searching wordpress to see if article already exists'.update);
-	return wp.posts().search(snippet)
+	return wp.posts().search(title)
 	.then(matchingPosts => {
 		if (matchingPosts.length > 0){ 
 			return Promise.reject('The following links came up in the search:' + matchingPosts.map(p => '\n' + p.link));
@@ -234,13 +251,51 @@ function createPostFromArticleObject(articleObj){
 		title: articleObj.title[0],
 		content: articleObj.body[0],
 		date: articleObj.creation_date[0],
-		slug: slugify(articleObj.title[0]) + '-' + articleObj.oid[0],
+		slug: createArticleSlug(articleObj),
 		status: 'draft',
-		ocw_author: 'author' in articleObj ? titleCase(articleObj.author[0]) : null
+		ocw_author: 'author' in articleObj ? titleCase(articleObj.author[0]) : null,
+		categories: articleObj.new_category_id ? [articleObj.new_category_id] : null
 	};
 	return wp.posts().create(postJSON);
 }
 
+
+function findCategoryForArticle(articleObj){
+	return new Promise((resolve, reject) => {
+		if (articleObj.category[0]){
+			//Category name first, because it's more specific
+			var categories = [articleObj.category[0].category_name[0].toLowerCase(), articleObj.category[0].section_name[0].toLowerCase()];
+			if (categories[0] === categories[1]) categories = [categories[0]];
+			console.log('Seeing if categories ' + categories + ' already exist...'.update);
+			var promises = categories.map(c => {
+				return wp.categories().search(c);
+			});
+			Promise.all(promises)
+			.then(results => {
+				var categoryId = false;
+				//First check for exact matches of the category name, then of the section name
+				results.forEach((resultSet, resultSetIndex) => {
+					var category = categories[resultSetIndex];
+					resultSet.forEach(result => {
+						if (result.name.toLowerCase() === category){
+							console.log(('Found matching category ' + result.name).success);
+							categoryId = result.id;
+							return false; //break
+						}
+					});
+					if (categoryId !== false) return false; //break
+				});
+				if (categoryId === false) console.log('Could not find matching pre-existing category'.update);
+				resolve(categoryId);	
+			})
+			.catch(reject);
+		}
+		else{
+			console.log('Article does not have any categories specified'.update);
+			resolve(false);
+		}
+	});
+}
 
 function slugify(text){
   // replace non letter or digits by -
