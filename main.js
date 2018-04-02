@@ -7,6 +7,8 @@ const { URL } = require('url');
 var request = require('request-promise');
 var validUrl = require('valid-url');
 const fs = require('fs');
+var access = fs.createWriteStream('./access.log');
+process.stdout.write = process.stderr.write = access.write.bind(access)
 const readdir = require('fs-readdir-promise');
 const opn = require('opn');
 const convert = require('xml-to-json-promise');
@@ -151,15 +153,15 @@ function checkFor404(urlObj){
 			}
 		})
 		.then(() => {
-			reject(options.url + ' responded with 200');
+			reject(url + ' responded with 200');
 		})
 		.catch(err => {
 			if (err.statusCode === 404) {
 				console.log('Received 404 response'.success);
 				resolve();
 			}
-			else if (err.statusCode === 503) reject(options.url + ' responded with 503, indicating improper login credentials in .env');
-			else reject(options.url + ' responded with ' + err.statusCode);
+			else if (err.statusCode === 503) reject(url + ' responded with 503, indicating improper login credentials in .env');
+			else reject(url + ' responded with ' + err.statusCode);
 		});
 	});
 }
@@ -299,7 +301,7 @@ function findCategoryForArticle(articleObj){
 
 function slugify(text){
   // replace non letter or digits by -
-  text = text.replace('~[^\pL\d]+~u', '-');
+  text = text.replace(/[^A-Za-z\d]+/g, '-');
 
   // transliterate
   //$text = iconv('utf-8', 'us-ascii//TRANSLIT', $text);
