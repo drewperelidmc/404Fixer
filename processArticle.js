@@ -20,8 +20,13 @@ var colors = require('colors');
 
 const entities = new Entities();
 const wpapi = require( 'wpapi' );
+const wp = new wpapi({
+	endpoint: process.env.url + '/wp-json/',
+	username: process.env.WP_USERNAME,
+	password: process.env.WP_PASSWORD
+});
 
-function processArticle(_url=null, _id=null, _year=null){
+function processArticle(_url=null, _id=null, _year=null, openEditPage=true){
 	//var access = fs.createWriteStream('./logs/' + dateFormat(Date.now(), 'yyyy-mm-dd_h-MM-ss') + '.log');
 	//process.stdout.write = process.stderr.write = access.write.bind(access)
 	return new Promise((_res, _rej) => {
@@ -70,7 +75,7 @@ function processArticle(_url=null, _id=null, _year=null){
 				searchPromise = readdir(process.env.XML_FILE_DIR)
 				.then(files => {
 					//For all files in xmlFiles, Search for article using id
-					return files.reduce((promise, file) => {
+					return files.reverse().reduce((promise, file) => {
 						return promise.then(found => {
 							if (found) return Promise.resolve(found);
 							return searchFileForArticle(file, articleId);
@@ -81,16 +86,18 @@ function processArticle(_url=null, _id=null, _year=null){
 			}
 			return searchPromise;
 		})
-		.then(article => {
-			return searchForArticle(article.title[0]).then(() => Promise.resolve(article));
-		})
 		.then (article => {
 			var newUrl = createArticleUrl(article);
 			if (newUrl !== articleUrl){
+				console.log('New url: ' + newUrl);
+				fs.appendFile('rewrites.csv', articleUrl + ',' + newUrl + '\n', () => {})
 				//Test new url for 404
-				return checkFor404(new URL(newUrl));
+				return checkFor404(new URL(newUrl)).then(() => Promise.resolve(article));
 			}
 			else return Promise.resolve(article);
+		})
+		.then(article => {
+			return searchForArticle(article.description[0]).then(() => Promise.resolve(article));
 		})
 		.then(article => {
 			return findCategoryForArticle(article).then(categoryId => {
@@ -102,8 +109,10 @@ function processArticle(_url=null, _id=null, _year=null){
 			return createPostFromArticleObject(article);
 		})
 		.then(result => {
-			var editUrl = process.env.URL + '/wp-admin/post.php?post=' + result.id + '&action=edit';
-			opn(editUrl);
+			if (openEditPage) {
+				var editUrl = process.env.URL + '/wp-admin/post.php?post=' + result.id + '&action=edit';
+				opn(editUrl);
+			} 
 			_res(true);
 		})
 		.catch(_rej);
@@ -160,7 +169,7 @@ function parseIdFromUrl(urlObj){
 	var pathname = urlObj.pathname;
 	//look for id
 	potentialIds = pathname.match(/\d{7}/g);
-	if (potentialIds.length === 0){
+	if (potentialIds === null){
 		console.log('Could not parse id from url. Please supply the id directly');
 		return false;
 	}
@@ -174,7 +183,6 @@ function parseIdFromUrl(urlObj){
 }
 
 function createArticleUrl(articleObj){
-	console.log(createArticleSlug(articleObj));
 	return buildUrl(process.env.URL, {path: createArticleSlug(articleObj)});
 }
 
@@ -182,14 +190,17 @@ function createArticleSlug(articleObj){
 	return slugify(articleObj.title[0]) + '-' + articleObj.oid[0];
 }
 
-function searchForArticle(title){
+function searchForArticle(snippet){
 	console.log('Searching wordpress to see if article already exists');
-	return wp.posts().search(title)
+	return wp.posts().search(snippet)
 	.then(matchingPosts => {
 		if (matchingPosts.length > 0){ 
 			return Promise.reject('The following links came up in the search:' + matchingPosts.map(p => '\n' + p.link));
 		}
-		else return Promise.resolve();
+		else {
+			console.log('Article does not appear to be on the site yet.');
+			return Promise.resolve();
+		}
 	});
 }
 
@@ -222,6 +233,7 @@ function searchFileForArticle(xmlFileName, id){
 			} 
 			//Found the article
 			console.log(('Found article in ' + xmlFileName));
+			console.log('Title: ' + article.title[0]);
 			return resolve(article);
 		})
 		.catch(reject);
@@ -239,13 +251,15 @@ function createPostFromArticleObject(articleObj){
 	//Create the json for the post
 	var postJSON = {
 		title: articleObj.title[0],
-		content: articleObj.body[0],
+		content: articleObj.body[0].replace('&amp;', '&'),
 		date: articleObj.creation_date[0],
 		slug: createArticleSlug(articleObj),
 		status: 'draft',
-		ocw_author: 'author' in articleObj ? titleCase(articleObj.author[0]) : null,
-		categories: articleObj.new_category_id ? [articleObj.new_category_id] : null
+		ocw_author: 'author' in articleObj ? titleCase(articleObj.author[0]) : null
 	};
+
+	if (articleObj.new_category_id) postJSON.categories = [articleObj.new_category_id]; 
+	
 	return wp.posts().create(postJSON);
 }
 

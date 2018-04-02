@@ -30,7 +30,7 @@
   },
   "devDependencies": {},
   "scripts": {
-    "start": "node main.js -i 6396598"
+    "start": "node main.js"
   },
   "author": "",
   "license": "ISC"

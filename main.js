@@ -6,14 +6,17 @@ var csv = require('fast-csv');
 var prompt = require('prompt-promise');
 const commandLineArgs = require('command-line-args')
 const optionDefinitions = [
-	{name: 'total', alias: 't', type: Number, defaultValue: 5},
-	{name: 'maxSimultaneous', alias: 'm', type: Number, defaultValue: 1}
+	{name: 'total', alias: 't', type: Number, defaultValue: 1000},
+	{name: 'maxSimultaneous', alias: 'm', type: Number, defaultValue: 1},
+	{name: 'prompt', alias: 'p', type: Boolean, defaultValue: false},
+	{name: 'openEditPage', alias: 'o', type: Boolean, defaultValue: false}
 ];
 const options = commandLineArgs(optionDefinitions);
 
 var csv = require("fast-csv");
 
 var links = [];
+
 
 csv
 .fromPath("logs/404s.csv", {headers: true})
@@ -30,18 +33,26 @@ function processArticleUrls(data){
 	var linkArrays = chunk(data, options.maxSimultaneous);
 	return linkArrays.reduce((promise, links) => {
 		return promise.then(doNext => {
-			if (!doNext) return Promise.resolve(true);
+			if (!doNext) return Promise.resolve(false);
 			return Promise.all(links.map(l => {
-				return processArticle(l.url);
+				console.log('\n');
+				console.log('\n');
+				console.log('\n');
+				console.log('Processing ' + l.url);
+				return processArticle(l.url, null, null, options.openEditPage);
 			}))
+			.catch(console.log)
 			.then(results => {
-				return prompt('Process next set of articles(y/n)?')
-				.then(res => {
-					if (res === 'y')
-						return Promise.resolve(true);
-					else return Promise.resolve(false);
-				});
+				if (options.prompt){
+					return prompt('Process next set of articles(y/n)?')
+					.then(res => {
+						if (res === 'y')
+							return Promise.resolve(true);
+						else return Promise.resolve(false);
+					});
+				}
+				else return Promise.resolve(true);
 			})
 		})
-	}, Promise.resolve())
+	}, Promise.resolve(true))
 }
