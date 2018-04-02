@@ -1,19 +1,23 @@
 
 var articleId;
 var articleYear;
+var articleUrl;
 require('dotenv').config();
 const { URL } = require('url');
+var request = require('request-promise');
 var validUrl = require('valid-url');
 const fs = require('fs');
 const readdir = require('fs-readdir-promise');
 const opn = require('opn');
 const convert = require('xml-to-json-promise');
 const titleCase = require('title-case');
+var buildUrl = require('build-url');
 const Entities = require('html-entities').AllHtmlEntities;
 var colors = require('colors');
 colors.setTheme({
     update: 'white',
-    prompt: ['green'],
+    prompt: ['magenta'],
+    success: ['green'],
     error: ['red'],
     warning: ['yellow']
 });
@@ -39,27 +43,23 @@ if (!('url' in options || 'id' in options)){
 	process.exit();
 }
 
+//First, parse the url if it was passed as a cla
+if (options.url){
+	if (validUrl.isWebUri(options.url))
+		articleUrl = new URL(options.url);
+	else articleUrl = new URL(buildUrl(process.env.URL, {path: options.url}));
+}
+
+var requestPromise;
+//First, if the url is provided, check to make sure it's actually a 404
+if (options.url){
+	requestPromise = checkFor404(articleUrl);
+}
+
 //First get the id if not supplied
 if (!options.id){
-	console.log('Extracting id from url...'.update);
-	var pathname;
-	if (validUrl.isWebUri(options.url)){
-		var url = new URL(options.url);
-		pathname = url.pathname;
-	}
-	else pathname = options.url;
-	//look for id
-	potentialIds = pathname.match(/\d{7}/g);
-	if (potentialIds.length === 0){
-		console.log('Could not parse id from url. Please supply the id directly'.error);
-		process.exit();
-	}
-	if (potentialIds.length > 1){
-		console.log('There is more than one potential id in the url. Please supply the id directly'.error);
-		process.exit();
-	}
-	articleId = potentialIds[0];
-	console.log(('Id found: ' + articleId).update);
+	articleId = parseIdFromUrl(articleUrl);
+	if (articleId === false) process.exit();
 }
 else articleId = options.id;
 
@@ -90,15 +90,7 @@ else {
 
 searchPromise
 .then(article => {
-	console.log('Searching wordpress to see if article already exists'.update);
-	var snippet = article.title[0];
-	return wp.posts().search(snippet)
-	.then(matchingPosts => {
-		if (matchingPosts.length > 0){ 
-			return Promise.reject('The following links came up in the search: ' + matchingPosts.map(p => p.link));
-		}
-		else return Promise.resolve(article);
-	});
+	return searchForArticle(article.description[0]).then(() => return Promise.resolve(article));
 })
 .then(article => {
 	console.log('Creating post...'.update);
@@ -122,8 +114,77 @@ searchPromise
 	var editUrl = process.env.URL + '/wp-admin/post.php?post=' + result.id + '&action=edit';
 	opn(editUrl);
 })
-.catch(err => console.log(err));
+.catch(err => {
+	if (typeof err === 'string') console.log(err.error);
+	else console.log(err);
+});
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/************************
+*
+* FUNCTIONS
+*
+*************************/
+
+function checkFor404(urlObj){
+	var url = urlObj.toString();
+	return new Promise((resolve, reject) => {
+		request({
+			uri: url,
+			resolveWithFullResponse: true
+		})
+		.then(() => {
+			reject(options.url + ' responded with 200');
+		})
+		.catch(err => {
+			if (err.statusCode === 404) resolve();
+			else reject(options.url + ' responded with ' + err.statusCode);
+		});
+	});
+}
+
+
+function parseIdFromUrl(urlObj){
+	console.log('Extracting id from url...'.update);
+	var pathname = urlObj.pathname;
+	//look for id
+	potentialIds = pathname.match(/\d{7}/g);
+	if (potentialIds.length === 0){
+		console.log('Could not parse id from url. Please supply the id directly'.error);
+		return false;
+	}
+	if (potentialIds.length > 1){
+		console.log('There is more than one potential id in the url. Please supply the id directly'.error);
+		return false;
+	}
+	console.log(('Id found: ' + articleId).success);
+	return potentialIds[0];
+}
+
+
+function searchForArticle(snippet){
+	console.log('Searching wordpress to see if article already exists'.update);
+	return wp.posts().search(snippet)
+	.then(matchingPosts => {
+		if (matchingPosts.length > 0){ 
+			return Promise.reject('The following links came up in the search:' + matchingPosts.map(p => '\n' + p.link));
+		}
+		else return Promise.resolve();
+	});
+}
 
 //Returns promise that resolves with either xml2js object, or false
 function searchFileForArticle(xmlFileName, id){
@@ -153,13 +214,32 @@ function searchFileForArticle(xmlFileName, id){
 				return resolve(false);
 			} 
 			//Found the article
-			console.log(('Found article in ' + xmlFileName).update);
+			console.log(('Found article in ' + xmlFileName).success);
 			return resolve(article);
 		})
 		.catch(reject);
 	})
 }
 
+
+function createPostFromArticleObject(articleObj){
+	console.log('Creating post...'.update);
+	//Time to post it to wordpress
+	
+	//Format the images and iframes
+	article = addImageHTML(articleObj);
+	article = addVideoHTML(articleObj);
+	//Create the json for the post
+	var postJSON = {
+		title: articleObj.title[0],
+		content: articleObj.body[0],
+		date: articleObj.creation_date[0],
+		slug: slugify(articleObj.title[0]) + '-' + articleObj.oid[0],
+		status: 'draft',
+		ocw_author: 'author' in articleObj ? titleCase(articleObj.author[0]) : null
+	};
+	return wp.posts().create(postJSON);
+}
 
 
 function slugify(text){
@@ -226,7 +306,7 @@ function addImageHTML(article){
 		body = body.replace(regex, imageTag);
 	}
 	if (replaced !== imageCount){
-		console.log('There was an error. Found ' + imageCount + ' image(s), but replaced ' + replaced);
+		console.log(('There was an error. Found ' + imageCount + ' image(s), but replaced ' + replaced).warning);
 	}
 	body = entities.decode(body);
 	article.body[0] = body;
@@ -244,7 +324,7 @@ function addVideoHTML(article){
 		body = body.replace(regex, videoTag);
 	}
 	if (replaced !== count){
-		console.log('There was an error. Found ' + count + ' video(s), but replaced ' + replaced);
+		console.log(('There was an error. Found ' + count + ' video(s), but replaced ' + replaced).warning);
 	}
 	body = entities.decode(body);
 	article.body[0] = body;

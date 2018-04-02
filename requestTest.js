@@ -1,6 +1,4 @@
 require('dotenv').config();
-var rp = require('request-promise');
-
 var wpapi = require( 'wpapi' );
 
 var wp = new wpapi({

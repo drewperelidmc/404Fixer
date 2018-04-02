@@ -4,6 +4,7 @@
   "description": "",
   "main": "main.js",
   "dependencies": {
+    "build-url": "^1.1.1",
     "colors": "^1.2.1",
     "command-line-args": "^5.0.2",
     "dotenv": "^5.0.1",
