@@ -12,10 +12,10 @@ const titleCase = require('title-case');
 const Entities = require('html-entities').AllHtmlEntities;
 var colors = require('colors');
 colors.setTheme({
-    update: 'cyan',
-    prompt: ['blue', 'bgWhite'],
-    error: ['red', 'bgWhite'],
-    warning: ['yellow', 'bgWhite']
+    update: 'white',
+    prompt: ['green'],
+    error: ['red'],
+    warning: ['yellow']
 });
 var prompt = require('prompt-promise');
 const entities = new Entities();
@@ -95,16 +95,7 @@ searchPromise
 	return wp.posts().search(snippet)
 	.then(matchingPosts => {
 		if (matchingPosts.length > 0){ 
-			console.log('The following links came up in the search:'.warning);
-			matchingPosts.forEach(p => {
-				console.log(('---' + p.link).warning);
-			});
-			return prompt('Create post anyway?(y/n) '.prompt)
-					.then(val => {
-						if (val === 'y') return Promise.resolve(article);
-						return Promise.reject();
-					})
-			//return Promise.reject('The following links came up in the search: ' + matchingPosts.map(p => p.link));
+			return Promise.reject('The following links came up in the search: ' + matchingPosts.map(p => p.link));
 		}
 		else return Promise.resolve(article);
 	});
@@ -131,7 +122,7 @@ searchPromise
 	var editUrl = process.env.URL + '/wp-admin/post.php?post=' + result.id + '&action=edit';
 	opn(editUrl);
 })
-.catch(err => console.log(err.toString().error));
+.catch(err => console.log(err));
 
 
 //Returns promise that resolves with either xml2js object, or false
