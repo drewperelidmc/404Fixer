@@ -10,8 +10,6 @@ var request = require('request-promise');
 var validUrl = require('valid-url');
 const fs = require('fs');
 var dateFormat = require('dateformat');
-var access = fs.createWriteStream('./logs/' + dateFormat(Date.now(), 'yyyy-mm-dd_h-MM-ss') + '.log');
-process.stdout.write = process.stderr.write = access.write.bind(access)
 const readdir = require('fs-readdir-promise');
 const opn = require('opn');
 const convert = require('xml-to-json-promise');
@@ -19,111 +17,98 @@ const titleCase = require('title-case');
 var buildUrl = require('build-url');
 const Entities = require('html-entities').AllHtmlEntities;
 var colors = require('colors');
-colors.setTheme({
-    update: 'white',
-    prompt: ['magenta'],
-    success: ['green'],
-    error: ['red'],
-    warning: ['yellow']
-});
-var prompt = require('prompt-promise');
+
 const entities = new Entities();
 const wpapi = require( 'wpapi' );
-const wp = new wpapi({
-	endpoint: process.env.url + '/wp-json/',
-	username: process.env.WP_USERNAME,
-	password: process.env.WP_PASSWORD
-});
-const commandLineArgs = require('command-line-args')
-//First validate command line arguments
-const optionDefinitions = [
-	{name: 'id', alias: 'i', type: Number},
-	{name: 'year', alias: 'y', type: Number},
-	{name: 'url', alias: 'u', type: String}
-];
-const options = commandLineArgs(optionDefinitions);
 
-if (!('url' in options || 'id' in options)){
-	console.error('You must supply either an id or a url as a command line argument');
-	process.exit();
-}
+function processArticle(_url=null, _id=null, _year=null){
+	//var access = fs.createWriteStream('./logs/' + dateFormat(Date.now(), 'yyyy-mm-dd_h-MM-ss') + '.log');
+	//process.stdout.write = process.stderr.write = access.write.bind(access)
+	return new Promise((_res, _rej) => {
+		var options = {
+			url: _url,
+			id: _id,
+			year: _year
+		};
 
-//First, parse the url if it was passed as a cla
-if (options.url){
-	if (validUrl.isWebUri(options.url))
-		articleUrl = new URL(options.url);
-	else articleUrl = new URL(buildUrl(process.env.URL, {path: options.url}));
-}
+		if (!options.url && !options.id){
+			return _rej('You must supply either an id or a url as an argument');
+		}
 
-//Then get the id if not supplied
-if (!options.id){
-	articleId = parseIdFromUrl(articleUrl);
-	if (articleId === false) process.exit();
-}
-else articleId = options.id;
+		//First, parse the url if it was passed as a cla
+		if (options.url){
+			if (validUrl.isWebUri(options.url))
+				articleUrl = new URL(options.url);
+			else articleUrl = new URL(buildUrl(process.env.URL, {path: options.url}));
+		}
 
-var requestPromise;
-//Then, if the url is provided, set up promise to check that it's actually a 404
-if (options.url) requestPromise = checkFor404(articleUrl);
-else requestPromise = Promise.resolve();
+		//Then get the id if not supplied
+		if (!options.id){
+			articleId = parseIdFromUrl(articleUrl);
+			if (articleId === false) return _rej('Could not parse article id from url');
+		}
+		else articleId = options.id;
+
+		var requestPromise;
+		//Then, if the url is provided, set up promise to check that it's actually a 404
+		if (options.url) requestPromise = checkFor404(articleUrl);
+		else requestPromise = Promise.resolve();
 
 
 
-//Load relevant xml file
-requestPromise
-.then(() => {
-	//Set up the search promise
-	var searchPromise;
-	if (options.year){
-		//If the year was supplied, we can just look through one file to find the article
-		const xmlFileName = 'Content-' + options.year + '.xml';
-		searchPromise = searchFileForArticle(xmlFileName, articleId);
-	}
-	else {
-		searchPromise = readdir(process.env.XML_FILE_DIR)
-		.then(files => {
-			//For all files in xmlFiles, Search for article using id
-			return files.reduce((promise, file) => {
-				return promise.then(found => {
-					if (found) return Promise.resolve(found);
-					return searchFileForArticle(file, articleId);
-				})
-			}, Promise.resolve())
+		//Load relevant xml file
+		requestPromise
+		.then(() => {
+			//Set up the search promise
+			var searchPromise;
+			if (options.year){
+				//If the year was supplied, we can just look through one file to find the article
+				const xmlFileName = 'Content-' + options.year + '.xml';
+				searchPromise = searchFileForArticle(xmlFileName, articleId);
+			}
+			else {
+				searchPromise = readdir(process.env.XML_FILE_DIR)
+				.then(files => {
+					//For all files in xmlFiles, Search for article using id
+					return files.reduce((promise, file) => {
+						return promise.then(found => {
+							if (found) return Promise.resolve(found);
+							return searchFileForArticle(file, articleId);
+						})
+					}, Promise.resolve())
 
-		});	
-	}
-	return searchPromise;
-})
-.then(article => {
-	return searchForArticle(article.title[0]).then(() => Promise.resolve(article));
-})
-.then (article => {
-	var newUrl = createArticleUrl(article);
-	if (newUrl !== articleUrl){
-		//Test new url for 404
-		return checkFor404(new URL(newUrl));
-	}
-	else return Promise.resolve(article);
-})
-.then(article => {
-	return findCategoryForArticle(article).then(categoryId => {
-		article.new_category_id = categoryId;
-		return Promise.resolve(article);
+				});	
+			}
+			return searchPromise;
+		})
+		.then(article => {
+			return searchForArticle(article.title[0]).then(() => Promise.resolve(article));
+		})
+		.then (article => {
+			var newUrl = createArticleUrl(article);
+			if (newUrl !== articleUrl){
+				//Test new url for 404
+				return checkFor404(new URL(newUrl));
+			}
+			else return Promise.resolve(article);
+		})
+		.then(article => {
+			return findCategoryForArticle(article).then(categoryId => {
+				article.new_category_id = categoryId;
+				return Promise.resolve(article);
+			})
+		})
+		.then(article => {
+			return createPostFromArticleObject(article);
+		})
+		.then(result => {
+			var editUrl = process.env.URL + '/wp-admin/post.php?post=' + result.id + '&action=edit';
+			opn(editUrl);
+			_res(true);
+		})
+		.catch(_rej);
 	})
-})
-.then(article => {
-	return createPostFromArticleObject(article);
-})
-.then(result => {
-	var editUrl = process.env.URL + '/wp-admin/post.php?post=' + result.id + '&action=edit';
-	opn(editUrl);
-})
-.catch(err => {
-	if (typeof err === 'string') console.log(err);
-	else console.log(err);
-});
-
-
+}
 
 
 
@@ -160,7 +145,7 @@ function checkFor404(urlObj){
 		})
 		.catch(err => {
 			if (err.statusCode === 404) {
-				console.log('Received 404 response');
+				console.log(url + ' received 404 response');
 				resolve();
 			}
 			else if (err.statusCode === 503) reject(url + ' responded with 503, indicating improper login credentials in .env');
@@ -391,3 +376,7 @@ function addVideoHTML(article){
 	return article;
 }
 
+
+
+
+module.exports = processArticle;

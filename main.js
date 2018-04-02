@@ -1,22 +1,47 @@
 require('dotenv').config();
+var processArticle = require('./processArticle');
+const fs = require('fs');
+var chunk = require('chunk');
 var csv = require('fast-csv');
-var spawn = require('child-process-promise').spawn;
 var prompt = require('prompt-promise');
 const commandLineArgs = require('command-line-args')
 const optionDefinitions = [
-	{name: 'maxSimultaneous', alias: 'm', type: Number, defaultValue: 3}
+	{name: 'total', alias: 't', type: Number, defaultValue: 5},
+	{name: 'maxSimultaneous', alias: 'm', type: Number, defaultValue: 1}
 ];
+const options = commandLineArgs(optionDefinitions);
+
+var csv = require("fast-csv");
+
+var links = [];
+
+csv
+.fromPath("logs/404s.csv", {headers: true})
+.on("data", function(data){
+	if (links.find(l => l.url === data.url)) return;
+	if (links.length < options.total) links.push(data);
+})
+.on("end", function(){
+	processArticleUrls(links).catch(console.log);
+});
 
 
-var exec = require('child-process-promise').exec;
- 
-exec('echo hello')
-    .then(function (result) {
-        var stdout = result.stdout;
-        var stderr = result.stderr;
-        console.log('stdout: ', stdout);
-        console.log('stderr: ', stderr);
-    })
-    .catch(function (err) {
-        console.error('ERROR: ', err);
-    });
+function processArticleUrls(data){
+	var linkArrays = chunk(data, options.maxSimultaneous);
+	return linkArrays.reduce((promise, links) => {
+		return promise.then(doNext => {
+			if (!doNext) return Promise.resolve(true);
+			return Promise.all(links.map(l => {
+				return processArticle(l.url);
+			}))
+			.then(results => {
+				return prompt('Process next set of articles(y/n)?')
+				.then(res => {
+					if (res === 'y')
+						return Promise.resolve(true);
+					else return Promise.resolve(false);
+				});
+			})
+		})
+	}, Promise.resolve())
+}
