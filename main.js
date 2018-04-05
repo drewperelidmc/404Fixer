@@ -39,7 +39,7 @@ function processArticleUrls(data){
 				console.log('\n');
 				console.log('\n');
 				console.log('Processing ' + l.url);
-				return processArticle(l.url, null, null, options.openEditPage);
+				return processArticle(l.url, null, options.openEditPage);
 			}))
 			.catch(console.log)
 			.then(results => {

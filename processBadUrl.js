@@ -1,9 +1,10 @@
 
 
-
-var articleId;
-var articleYear;
-var articleUrl;
+var itemType; //'article' or 'event'
+var itemId;
+var itemUrl;
+var itemTitle;
+var itemDate;
 require('dotenv').config();
 const { URL } = require('url');
 var request = require('request-promise');
@@ -26,87 +27,88 @@ const wp = new wpapi({
 	password: process.env.WP_PASSWORD
 });
 
-function processArticle(_url=null, _id=null, _year=null, openEditPage=true){
+function processBadUrl(_url=null, openEditPage=true){
 	//var access = fs.createWriteStream('./logs/' + dateFormat(Date.now(), 'yyyy-mm-dd_h-MM-ss') + '.log');
 	//process.stdout.write = process.stderr.write = access.write.bind(access)
 	return new Promise((_res, _rej) => {
 		var options = {
-			url: _url,
-			id: _id,
-			year: _year
+			url: _url
 		};
 
-		if (!options.url && !options.id){
-			return _rej('You must supply either an id or a url as an argument');
+		if (!options.url){
+			return _rej('You must supply a url');
 		}
 
 		//First, parse the url if it was passed as a cla
-		if (options.url){
-			if (validUrl.isWebUri(options.url))
-				articleUrl = new URL(options.url);
-			else articleUrl = new URL(buildUrl(process.env.URL, {path: options.url}));
+		
+		if (validUrl.isWebUri(options.url))
+			itemUrl = new URL(options.url);
+		else itemUrl = new URL(buildUrl(process.env.URL, {path: options.url}));
+
+		//Figure out if it's an event
+		if (itemUrl.pathname.split('/').shift()[0] === 'events' || itemUrl.pathname.split('/').shift()[0] === 'oc-weekly-events'){
+			itemType = 'event';
 		}
+		else itemType = 'article';
 
 		//Then get the id if not supplied
-		if (!options.id){
-			articleId = parseIdFromUrl(articleUrl);
-			if (articleId === false) return _rej('Could not parse article id from url');
+		if (itemType === 'article'){
+			itemId = parseIdFromUrl(itemUrl);
+			if (itemId === false) return _rej('Could not parse article id from url');
 		}
-		else articleId = options.id;
+		else if (itemType === 'event'){
+			var itemTitleUrl = itemUrl.pathname.split('/').shift()[1];
+			//Search for date
+			var dateRegex = /\d{4}-\d{2}-\d{2}/;
+			var match = itemTitleUrl.match(dateRegex);
+			if (match){
+				itemDate = match[0];
+				itemTitleUrl.replace(itemDate, '');
+			}
+			itemTitle = decodeURIComponent(itemTitleUrl.replace('-', ''));
+		}
 
-		var requestPromise;
-		//Then, if the url is provided, set up promise to check that it's actually a 404
-		if (options.url) requestPromise = checkFor404(articleUrl);
-		else requestPromise = Promise.resolve();
 
 
-
+		//Make sure the url is actually a 404
+		checkFor404(itemUrl)
 		//Load relevant xml file
-		requestPromise
 		.then(() => {
-			//Set up the search promise
-			var searchPromise;
-			if (options.year){
-				//If the year was supplied, we can just look through one file to find the article
-				const xmlFileName = 'Content-' + options.year + '.xml';
-				searchPromise = searchFileForArticle(xmlFileName, articleId);
-			}
-			else {
-				searchPromise = readdir(process.env.XML_FILE_DIR)
-				.then(files => {
-					//For all files in xmlFiles, Search for article using id
-					return files.reverse().reduce((promise, file) => {
-						return promise.then(found => {
-							if (found) return Promise.resolve(found);
-							return searchFileForArticle(file, articleId);
-						})
-					}, Promise.resolve())
+			//Search for item in files
+			var dir = itemType === 'article' ? process.env.ARTICLE_XML_DIR : process.env.EVENT_XML_DIR; 
+			return readdir(dir)
+			.then(files => {
+				//For all files in xmlFiles, Search for article using id
+				return files.reverse().reduce((promise, file) => {
+					return promise.then(found => {
+						if (found) return Promise.resolve(found);
+						return searchFileForItem(dir + '/' + file, itemId, itemTitle, itemName)
+					})
+				}, Promise.resolve())
 
-				});	
-			}
-			return searchPromise;
+			});	
 		})
-		.then (article => {
-			var newUrl = createArticleUrl(article);
-			if (newUrl !== articleUrl){
+		.then (item => {
+			var newUrl = createUrl(item, itemType);
+			if (newUrl !== itemUrl){
 				console.log('New url: ' + newUrl);
-				fs.appendFile('rewrites.csv', articleUrl + ',' + newUrl + '\n', () => {})
+				fs.appendFile('rewrites.csv', itemUrl + ',' + newUrl + '\n', () => {})
 				//Test new url for 404
-				return checkFor404(new URL(newUrl)).then(() => Promise.resolve(article));
+				return checkFor404(new URL(newUrl)).then(() => Promise.resolve(item));
 			}
-			else return Promise.resolve(article);
+			else return Promise.resolve(item);
 		})
-		.then(article => {
-			return searchForArticle(article.description[0]).then(() => Promise.resolve(article));
+		.then(item => {
+			return searchForItem(item.description[0]).then(() => Promise.resolve(item));
 		})
-		.then(article => {
-			return findCategoryForArticle(article).then(categoryId => {
-				article.new_category_id = categoryId;
-				return Promise.resolve(article);
+		.then(item => {
+			return findCategoryForItem(item).then(categoryId => {
+				item.new_category_id = categoryId;
+				return Promise.resolve(item);
 			})
 		})
-		.then(article => {
-			return createPostFromArticleObject(article);
+		.then(item => {
+			return createPostFromItemObject(item, itemType);
 		})
 		.then(result => {
 			if (openEditPage) {
@@ -182,34 +184,39 @@ function parseIdFromUrl(urlObj){
 	return found;
 }
 
-function createArticleUrl(articleObj){
-	return buildUrl(process.env.URL, {path: createArticleSlug(articleObj)});
+function createUrl(itemObj, itemType){
+	return buildUrl(process.env.URL, {path: createSlug(itemObj)});
 }
 
-function createArticleSlug(articleObj){
-	return slugify(articleObj.title[0]) + '-' + articleObj.oid[0];
+function createSlug(itemObj, itemType){
+
+	if (itemType === 'article')
+		return slugify(itemObj.title[0]) + '-' + itemObj.oid[0];
+	else if (itemType === 'event')
+		return slugify(itemObj.title[0]) + '-' + itemObj.display_time[0].event_date[0];
 }
 
-function searchForArticle(snippet){
-	console.log('Searching wordpress to see if article already exists');
+function searchForItem(snippet){
+	console.log('Searching wordpress to see if item already exists');
 	return wp.posts().search(snippet)
 	.then(matchingPosts => {
 		if (matchingPosts.length > 0){ 
 			return Promise.reject('The following links came up in the search:' + matchingPosts.map(p => '\n' + p.link));
 		}
 		else {
-			console.log('Article does not appear to be on the site yet.');
+			console.log('Item does not appear to be on the site yet.');
 			return Promise.resolve();
 		}
 	});
 }
 
 //Returns promise that resolves with either xml2js object, or false
-function searchFileForArticle(xmlFileName, id){
+function searchFileForItem(path, id=null, name=null, date=null){
 	return new Promise((resolve, reject) => {
-		if (isNaN(id)) return reject('Expecting id to be a number, received ' + id);
+		if (!id && !name && !date) return reject('You must supply an id, name, or, date');
+		if (date && !name) return reject('You must supply a name with the date');
 		convert.xmlFileToJSON(
-			'xmlFiles/' + xmlFileName, 
+			path, 
 			{
 				strict: false,
 				normalizeTags: true,
@@ -222,19 +229,38 @@ function searchFileForArticle(xmlFileName, id){
 			}
 		)
 		.then(json => {
-			console.log(('Searching for ' + id + ' in ' + xmlFileName + '...'));
 			//Search for id in resulting json
 			items = json.rss.channel[0].item;
-			var article = items.find(item => {
-				return Number(item.oid[0]) === Number(id);
-			});
-			if (typeof article === 'undefined'){
+			if (id){
+				console.log(('Searching for id: ' + id + ' in ' + xmlFileName + '...'));
+				var item = items.find(item => {
+
+					return Number(item.oid[0]) === Number(id);
+				});
+			}
+			else if (date){
+				console.log(('Searching for date: ' + date + ' in ' + path + '...'));
+				var item = items.find(item => {
+					//Name and date match
+					return item.title[0].toLowerCase() === entities.decode(name.toLowerCase())
+						&& item.displayTime[0].event_date.find(eventDate => {
+						return eventDate === date;
+					});
+				});
+			}
+			else if (name){
+				console.log(('Searching for name: ' + name + ' in ' + path + '...'));
+				var item = items.find(item => {
+					return item.title[0].toLowerCase() === entities.decode(name.toLowerCase());
+				});
+			}
+			if (typeof item === 'undefined'){
 				return resolve(false);
 			} 
 			//Found the article
-			console.log(('Found article in ' + xmlFileName));
-			console.log('Title: ' + article.title[0]);
-			return resolve(article);
+			console.log(('Found item in ' + xmlFileName));
+			console.log('Title: ' + item.title[0]);
+			return resolve(item);
 		})
 		.catch(reject);
 	})

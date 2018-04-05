@@ -26,7 +26,7 @@ crawler.discoverResources = function(buffer, queueItem) {
     }).get();
 };
 
-crawler.on('fetchcomplete', () => {
+crawler.on('fetchcomplete', (queueItem) => {
 	urlsCrawled++;
 	updateGUI();
 });
