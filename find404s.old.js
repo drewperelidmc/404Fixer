@@ -1,9 +1,15 @@
 const fs = require('fs');
-var Crawler = require('simplecrawler');
+var blc = require('broken-link-checker');
 var csv = require('fast-csv');
-const cheerio = require('cheerio')
+var Spinner = require('cli-spinner').Spinner;
+var spinner = new Spinner('Scanning home page... %s');
 
-var url = "https://www.ocweekly.com/";
+var options = {
+	excludeExternalLinks: true,
+	filterLevel: 0,
+	cacheResponses: true
+	//excludedKeywords: ['https://www.ocweekly.com/events/']
+}
 
 var writeStream404 = fs.createWriteStream('./logs/404s.csv');
 var csvStream404 = csv.createWriteStream({headers: true});
@@ -11,53 +17,6 @@ csvStream404.pipe(writeStream404);
 var writeStreamOther = fs.createWriteStream('./logs/otherErrors.csv');
 var csvStreamOther = csv.createWriteStream({headers: true});
 csvStreamOther.pipe(writeStream404);
-
-var urlsCrawled = 0;
-var errorsFound = 0;
-
-var crawler = new Crawler(url);
-crawler.parseHTMLComments = false;
-
-crawler.discoverResources = function(buffer, queueItem) {
-    var $ = cheerio.load(buffer.toString("utf8"));
-
-    return $("a[href]").map(function () {
-        return $(this).attr("href");
-    }).get();
-};
-
-crawler.on('fetchcomplete', () => {
-	urlsCrawled++;
-	updateGUI();
-});
-
-crawler.on('fetch404', (queueItem, responseObject) => {
-	var url = queueItem.url;
-	var referrer = queueItem.referrer;
-	csvStream404.write({
-		url: url,
-		referrer: referrer
-	});
-	errorsFound++;
-});
-
-drawGUI();
-crawler.start();
-
-
-function updateGUI(){
-	process.stdout.clearLine();
-	process.stdout.cursorTo(0);
-	process.stdout.write('URLs Scanned: ' + urlsCrawled + ' | 404s Found: ' + errorsFound);
-}
-
-
-function drawGUI(){
-	process.stdout.write('Scanning ' + url + '\n');
-	process.stdout.write('URLs Scanned: ' + urlsCrawled + ' | 404s Found: ' + errorsFound);
-}
-
-/*
 
 
 var c = new blc.SiteChecker(options, {
@@ -100,4 +59,3 @@ fs.appendFile('./logs/linksCrawled.log', '{"sites":[', () => {
 	c.enqueue('http://www.ocweekly.com/');
 });
 
-*/
