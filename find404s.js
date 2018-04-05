@@ -7,9 +7,8 @@ var spinner = new Spinner('Scanning home page... %s');
 var options = {
 	excludeExternalLinks: true,
 	filterLevel: 0,
-	maxSocketsPerHost: 10,
-	cacheResponses: true,
-	excludedKeywords: ['https://www.ocweekly.com/events/']
+	cacheResponses: true
+	//excludedKeywords: ['https://www.ocweekly.com/events/']
 }
 
 var writeStream404 = fs.createWriteStream('./logs/404s.csv');
