@@ -1,0 +1,4 @@
+urlPattern,
+/^archives/,
+/^ink\/\d{2}\/\d{2}/
+/^content\/printVersion/
