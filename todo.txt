@@ -1,0 +1,5 @@
+
+Make 'suggested redirects' file, where if an article/event is found using wordpress search, suggest redirecting to the first post found
+
+Write script that adds categories
+

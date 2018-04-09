@@ -46,10 +46,13 @@ function processBadUrl(_url=null, openEditPage=true){
 		else itemUrl = new URL(buildUrl(process.env.URL, {path: options.url}));
 
 		//Figure out if it's an event
+		/*
 		if (itemUrl.pathname.split('/').shift()[0] === 'events' || itemUrl.pathname.split('/').shift()[0] === 'oc-weekly-events'){
 			itemType = 'event';
 		}
-		else itemType = 'article';
+		else 
+		*/
+		itemType = 'article';
 
 		//Then get the id if not supplied
 		if (itemType === 'article'){
