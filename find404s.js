@@ -1,9 +1,10 @@
 const fs = require('fs');
 var Crawler = require('simplecrawler');
 var csv = require('fast-csv');
-const cheerio = require('cheerio')
+const cheerio = require('cheerio');
 
 var url = "https://www.ocweekly.com/";
+var saveFile = 'crawlQueue.jsons';
 
 var writeStream404 = fs.createWriteStream('./logs/404s.csv');
 var csvStream404 = csv.createWriteStream({headers: true});
@@ -12,8 +13,10 @@ var writeStreamOther = fs.createWriteStream('./logs/otherErrors.csv');
 var csvStreamOther = csv.createWriteStream({headers: true});
 csvStreamOther.pipe(writeStream404);
 
-var urlsCrawled = 0;
-var errorsFound = 0;
+var totalUrlsCrawled = 0;
+var totalErrorsFound = 0;
+var sessionUrlsCrawled = 0;
+var sessionErrorsFound = 0;
 
 var crawler = new Crawler(url);
 crawler.parseHTMLComments = false;
@@ -27,8 +30,13 @@ crawler.discoverResources = function(buffer, queueItem) {
 };
 
 crawler.on('fetchcomplete', (queueItem) => {
-	urlsCrawled++;
+	sessionUrlsCrawled++;
 	updateGUI();
+	var d = new Date();
+	if (!validTime()){
+		console.log('Script is now exiting because of time');
+		saveAndQuit();
+	}
 });
 
 crawler.on('fetch404', (queueItem, responseObject) => {
@@ -38,23 +46,90 @@ crawler.on('fetch404', (queueItem, responseObject) => {
 		url: url,
 		referrer: referrer
 	});
-	errorsFound++;
+	sessionErrorsFound++;
 });
 
-drawGUI();
-crawler.start();
+if (!validTime()){
+	console.log('Not a valid time to run the script');
+	process.exit();
+}
+
+loadQueueIfExistsAndStart();
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 function updateGUI(){
 	process.stdout.clearLine();
 	process.stdout.cursorTo(0);
-	process.stdout.write('URLs Scanned: ' + urlsCrawled + ' | 404s Found: ' + errorsFound);
+	process.stdout.write('URLs Scanned This Session: ' + sessionUrlsCrawled + ' | 404s Found This Session: ' + sessionErrorsFound);
 }
 
 
 function drawGUI(){
 	process.stdout.write('Scanning ' + url + '\n');
-	process.stdout.write('URLs Scanned: ' + urlsCrawled + ' | 404s Found: ' + errorsFound);
+	process.stdout.write('Total URLs Scanned: ' + totalUrlsCrawled + ' | Total 404s Found: ' + totalErrorsFound);
+	process.stdout.write('\n');
+	process.stdout.write('URLs Scanned This Session: ' + sessionUrlsCrawled + ' | 404s Found This Session: ' + sessionErrorsFound);
+}
+
+
+function saveAndQuit(){
+	crawler.queue.freeze(saveFile, function () {
+	    process.exit();
+	});
+}
+
+
+function loadQueueIfExistsAndStart(){
+	fs.stat(saveFile, err => {
+		if (!err) {
+			console.log('Found save file at ' + saveFile);
+			crawler.queue.defrost(saveFile, () => { 
+				updateTotalsFromSaveFile(() => {
+					drawGUI();
+					crawler.start();
+				});
+			});
+		}
+		else if (err.code == 'ENOENT'){
+			console.log('Could not find save file at ' + saveFile);
+			drawGUI();
+			crawler.start();
+		}
+		else{
+			console.log(err.code);
+			process.exit();
+		}
+	});
+}
+
+function updateTotalsFromSaveFile(callback){
+	crawler.queue.countItems({ fetched: true }, (err, count) => {
+		totalUrlsCrawled = count;
+		crawler.queue.countItems({ status: 'notfound' }, (err, count) => {
+			totalErrorsFound = count;
+			callback();
+		});
+	});
+
+}
+
+function validTime(){
+	if (d.getHours() < 23 && d.getHours() > 4){
+		return false;
+	}
+	return true;
 }
 
 /*

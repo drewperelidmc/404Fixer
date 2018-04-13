@@ -1,0 +1,34 @@
+{
+  "0": {
+    "host": "www.ocweekly.com",
+    "path": "/",
+    "port": "",
+    "protocol": "https",
+    "uriPath": "/",
+    "url": "https://www.ocweekly.com/",
+    "depth": 1,
+    "fetched": true,
+    "status": "downloaded",
+    "stateData": {
+      "requestLatency": 1845,
+      "requestTime": 2269,
+      "contentLength": 232892,
+      "contentType": "text/html; charset=UTF-8",
+      "code": 200,
+      "headers": {
+        "date": "Fri, 13 Apr 2018 22:32:21 GMT",
+        "server": "Apache",
+        "x-pingback": "https://www.ocweekly.com/xmlrpc.php",
+        "link": "<https://www.ocweekly.com/wp-json/>; rel=\"https://api.w.org/\", <https://www.ocweekly.com/>; rel=shortlink",
+        "content-length": "232892",
+        "connection": "close",
+        "content-type": "text/html; charset=UTF-8"
+      },
+      "downloadTime": 424,
+      "actualDataSize": 232892,
+      "sentIncorrectSize": false
+    },
+    "id": 0
+  },
+  "length": 1
+}
