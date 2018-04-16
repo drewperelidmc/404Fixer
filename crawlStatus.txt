@@ -1,0 +1,4 @@
+Found save file at crawlQueue.json
+Scanning https://www.ocweekly.com/
+Total URLs Scanned: 48 | Total 404s Found: 0
+URLs Scanned This Session: 0 | 404s Found This Session: 0

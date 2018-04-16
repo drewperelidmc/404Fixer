@@ -2,9 +2,15 @@ const fs = require('fs');
 var Crawler = require('simplecrawler');
 var csv = require('fast-csv');
 const cheerio = require('cheerio');
+const commandLineArgs = require('command-line-args');
+
+const optionDefinitions = [
+	{name: 'overide_time', alias: 'o', type: Boolean, defaultValue: false}
+];
+const options = commandLineArgs(optionDefinitions);
 
 var url = "https://www.ocweekly.com/";
-var saveFile = 'crawlQueue.jsons';
+var saveFile = 'crawlQueue.json';
 
 var writeStream404 = fs.createWriteStream('./logs/404s.csv');
 var csvStream404 = csv.createWriteStream({headers: true});
@@ -32,7 +38,6 @@ crawler.discoverResources = function(buffer, queueItem) {
 crawler.on('fetchcomplete', (queueItem) => {
 	sessionUrlsCrawled++;
 	updateGUI();
-	var d = new Date();
 	if (!validTime()){
 		console.log('Script is now exiting because of time');
 		saveAndQuit();
@@ -53,6 +58,7 @@ if (!validTime()){
 	console.log('Not a valid time to run the script');
 	process.exit();
 }
+
 
 loadQueueIfExistsAndStart();
 
@@ -126,6 +132,8 @@ function updateTotalsFromSaveFile(callback){
 }
 
 function validTime(){
+	if (options.overide_time) return true;
+	var d = new Date();
 	if (d.getHours() < 23 && d.getHours() > 4){
 		return false;
 	}
