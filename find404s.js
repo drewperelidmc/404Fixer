@@ -1,21 +1,23 @@
 const fs = require('fs');
+var readline = require('readline');
 var Crawler = require('simplecrawler');
 var csv = require('fast-csv');
 const cheerio = require('cheerio');
 const commandLineArgs = require('command-line-args');
 
 const optionDefinitions = [
-	{name: 'overide_time', alias: 'o', type: Boolean, defaultValue: false}
+	{name: 'overide_time', alias: 'o', type: Boolean, defaultValue: false},
+	{name: 'output_file', alias: 'f', type: String, defaultValue: false}
 ];
 const options = commandLineArgs(optionDefinitions);
 
 var url = "https://www.ocweekly.com/";
 var saveFile = 'crawlQueue.json';
 
-var writeStream404 = fs.createWriteStream('./logs/404s.csv');
+var writeStream404 = fs.createWriteStream('./logs/404s.csv', {flags: 'a'});
 var csvStream404 = csv.createWriteStream({headers: true});
 csvStream404.pipe(writeStream404);
-var writeStreamOther = fs.createWriteStream('./logs/otherErrors.csv');
+var writeStreamOther = fs.createWriteStream('./logs/otherErrors.csv', {flags: 'a'});
 var csvStreamOther = csv.createWriteStream({headers: true});
 csvStreamOther.pipe(writeStream404);
 
@@ -39,7 +41,7 @@ crawler.on('fetchcomplete', (queueItem) => {
 	sessionUrlsCrawled++;
 	updateGUI();
 	if (!validTime()){
-		console.log('Script is now exiting because of time');
+		log('Script is now exiting because of time');
 		saveAndQuit();
 	}
 });
@@ -55,10 +57,13 @@ crawler.on('fetch404', (queueItem, responseObject) => {
 });
 
 if (!validTime()){
-	console.log('Not a valid time to run the script');
+	log('Not a valid time to run the script');
 	process.exit();
 }
 
+process.on('SIGINT', function() {
+    saveAndQuit();
+});
 
 loadQueueIfExistsAndStart();
 
@@ -71,26 +76,30 @@ loadQueueIfExistsAndStart();
 
 
 
-
+function log(message){
+	if (!options.output_file) process.stdout.write(message);
+	else fs.writeFile(options.output_file, message, () => {});
+}
 
 
 
 function updateGUI(){
-	process.stdout.clearLine();
-	process.stdout.cursorTo(0);
+	readline.clearLine(process.stdout, 0);
+	readline.cursorTo(process.stdout, 0, null)
 	process.stdout.write('URLs Scanned This Session: ' + sessionUrlsCrawled + ' | 404s Found This Session: ' + sessionErrorsFound);
 }
 
 
 function drawGUI(){
 	process.stdout.write('Scanning ' + url + '\n');
-	process.stdout.write('Total URLs Scanned: ' + totalUrlsCrawled + ' | Total 404s Found: ' + totalErrorsFound);
+	process.stdout.write('Prior URLs Scanned: ' + totalUrlsCrawled + ' | Prior 404s Found: ' + totalErrorsFound);
 	process.stdout.write('\n');
 	process.stdout.write('URLs Scanned This Session: ' + sessionUrlsCrawled + ' | 404s Found This Session: ' + sessionErrorsFound);
 }
 
 
 function saveAndQuit(){
+	if (options.output_file) log('Prior URLs Scanned: ' + totalUrlsCrawled + ' | Prior 404s Found: ' + totalErrorsFound + '\n' + 'URLs Scanned This Session: ' + sessionUrlsCrawled + ' | 404s Found This Session: ' + sessionErrorsFound);
 	crawler.queue.freeze(saveFile, function () {
 	    process.exit();
 	});
@@ -100,21 +109,21 @@ function saveAndQuit(){
 function loadQueueIfExistsAndStart(){
 	fs.stat(saveFile, err => {
 		if (!err) {
-			console.log('Found save file at ' + saveFile);
+			log('Found save file at ' + saveFile);
 			crawler.queue.defrost(saveFile, () => { 
 				updateTotalsFromSaveFile(() => {
-					drawGUI();
+					if (!options.output_file) drawGUI();
 					crawler.start();
 				});
 			});
 		}
 		else if (err.code == 'ENOENT'){
-			console.log('Could not find save file at ' + saveFile);
-			drawGUI();
+			log('Could not find save file at ' + saveFile);
+			if (!options.output_file) drawGUI();
 			crawler.start();
 		}
 		else{
-			console.log(err.code);
+			log(err.code);
 			process.exit();
 		}
 	});
